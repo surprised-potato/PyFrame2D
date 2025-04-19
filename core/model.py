@@ -14,7 +14,7 @@ except ImportError:
         raise NotImplementedError("Units module not available.")
     def format_value_unit(value, base_unit_str, precision=3):
         return f"{value} {base_unit_str} (units disabled)"
-
+from typing import Type, Optional 
 class Node:
     """
     Represents a node (point) in the structural model.
@@ -957,6 +957,329 @@ class MemberUDLoad(MemberLoad):
 # class MemberTrapezoidalLoad(MemberLoad): ...
 # class ThermalLoad(Load): ...
 
+
+class StructuralModel:
+    """
+    Container class for the entire structural model.
+
+    Manages nodes, materials, sections, members, supports, and loads.
+    Provides methods for adding, removing, retrieving components, validation,
+    and generating Degree-of-Freedom (DOF) mapping.
+    """
+    def __init__(self, name: str = "Untitled Model"):
+        """
+        Initializes an empty StructuralModel.
+
+        Args:
+            name (str): Optional name for the model.
+        """
+        self.name: str = name
+        self.nodes: dict[int, Node] = {}
+        self.materials: dict[int, Material] = {}
+        self.sections: dict[int, SectionProfile] = {}
+        self.members: dict[int, Member] = {}
+        # Supports are keyed by the node_id they apply to
+        self.supports: dict[int, Support] = {}
+        # Loads are keyed by their own unique load_id
+        self.loads: dict[int, Load] = {}
+
+        # DOF mapping related attributes (generated later)
+        self._dof_map: Optional[dict[tuple[int, str], int]] = None
+        self._constrained_dofs: Optional[set[tuple[int, str]]] = None
+        self._num_active_dofs: Optional[int] = None
+
+    # --- Component Addition Methods ---
+
+    def add_node(self, node: Node):
+        """Adds a Node object to the model."""
+        if not isinstance(node, Node):
+            raise TypeError("Item to add must be a Node object.")
+        if node.id in self.nodes:
+            raise ValueError(f"Node with ID {node.id} already exists.")
+        self.nodes[node.id] = node
+        self._invalidate_dof_map() # Adding nodes changes DOF map
+
+    def add_material(self, material: Material):
+        """Adds a Material object to the model."""
+        if not isinstance(material, Material):
+            raise TypeError("Item to add must be a Material object.")
+        if material.id in self.materials:
+            raise ValueError(f"Material with ID {material.id} already exists.")
+        self.materials[material.id] = material
+
+    def add_section(self, section: SectionProfile):
+        """Adds a SectionProfile object to the model."""
+        if not isinstance(section, SectionProfile):
+            raise TypeError("Item to add must be a SectionProfile object.")
+        if section.id in self.sections:
+            raise ValueError(f"SectionProfile with ID {section.id} already exists.")
+        self.sections[section.id] = section
+
+    def add_member(self, member: Member):
+        """Adds a Member object to the model."""
+        if not isinstance(member, Member):
+            raise TypeError("Item to add must be a Member object.")
+        if member.id in self.members:
+            raise ValueError(f"Member with ID {member.id} already exists.")
+
+        # Basic check if nodes exist - more thorough check in validate()
+        #if member.start_node.id not in self.nodes:
+        #     raise ValueError(f"Member {member.id} references non-existent start_node {member.start_node.id}")
+        #if member.end_node.id not in self.nodes:
+        #     raise ValueError(f"Member {member.id} references non-existent end_node {member.end_node.id}")
+        
+        self.members[member.id] = member
+
+    def add_support(self, support: Support):
+        """Adds a Support object to the model."""
+        if not isinstance(support, Support):
+            raise TypeError("Item to add must be a Support object.")
+        #if support.node_id not in self.nodes:
+        #     raise ValueError(f"Support references non-existent node_id {support.node_id}.")
+        if support.node_id in self.supports:
+            raise ValueError(f"Support already defined for node_id {support.node_id}.")
+        self.supports[support.node_id] = support
+        self._invalidate_dof_map() # Adding supports changes DOF map
+
+    def add_load(self, load: Load):
+        """Adds any Load object (NodalLoad, MemberLoad, etc.) to the model."""
+        if not isinstance(load, Load):
+            raise TypeError("Item to add must be a Load-derived object.")
+        if load.id in self.loads:
+            raise ValueError(f"Load with ID {load.id} already exists.")
+        # Basic check if target node/member exists - more thorough check in validate()
+        #if isinstance(load, NodalLoad):
+        #    if load.node_id not in self.nodes:
+        #        raise ValueError(f"NodalLoad {load.id} references non-existent node_id {load.node_id}.")
+        #elif isinstance(load, MemberLoad):
+        #    if load.member_id not in self.members:
+        #         raise ValueError(f"MemberLoad {load.id} references non-existent member_id {load.member_id}.")
+        self.loads[load.id] = load
+
+    # --- Component Retrieval Methods ---
+
+    def get_node(self, node_id: int) -> Node:
+        """Retrieves a Node by its ID. Raises KeyError if not found."""
+        try:
+            return self.nodes[node_id]
+        except KeyError:
+            raise KeyError(f"Node with ID {node_id} not found in the model.")
+
+    def get_material(self, material_id: int) -> Material:
+        """Retrieves a Material by its ID. Raises KeyError if not found."""
+        try:
+            return self.materials[material_id]
+        except KeyError:
+            raise KeyError(f"Material with ID {material_id} not found in the model.")
+
+    def get_section(self, section_id: int) -> SectionProfile:
+        """Retrieves a SectionProfile by its ID. Raises KeyError if not found."""
+        try:
+            return self.sections[section_id]
+        except KeyError:
+            raise KeyError(f"SectionProfile with ID {section_id} not found in the model.")
+
+    def get_member(self, member_id: int) -> Member:
+        """Retrieves a Member by its ID. Raises KeyError if not found."""
+        try:
+            return self.members[member_id]
+        except KeyError:
+            raise KeyError(f"Member with ID {member_id} not found in the model.")
+
+    def get_support(self, node_id: int) -> Optional[Support]:
+        """Retrieves the Support for a given node_id. Returns None if no support exists."""
+        return self.supports.get(node_id) # Use .get() for optional retrieval
+
+    def get_load(self, load_id: int) -> Load:
+        """Retrieves a Load by its ID. Raises KeyError if not found."""
+        try:
+            return self.loads[load_id]
+        except KeyError:
+            raise KeyError(f"Load with ID {load_id} not found in the model.")
+
+    # --- Component Removal Methods (Basic - No Cascade Checks Yet) ---
+
+    def remove_node(self, node_id: int):
+        """Removes a Node by ID. Warning: Does not check for dependent members/supports/loads."""
+        if node_id not in self.nodes:
+            raise KeyError(f"Node with ID {node_id} not found.")
+        del self.nodes[node_id]
+        # Also remove associated support if it exists
+        if node_id in self.supports:
+            del self.supports[node_id]
+        # Invalidate DOF map
+        self._invalidate_dof_map()
+        # Warning: Loads targeting this node might become invalid. Validation needed.
+
+    def remove_member(self, member_id: int):
+        """Removes a Member by ID. Warning: Does not check for dependent loads."""
+        if member_id not in self.members:
+            raise KeyError(f"Member with ID {member_id} not found.")
+        del self.members[member_id]
+        # Warning: Loads targeting this member might become invalid. Validation needed.
+
+    def remove_support(self, node_id: int):
+        """Removes the Support associated with a node_id."""
+        if node_id not in self.supports:
+            raise KeyError(f"Support for node ID {node_id} not found.")
+        del self.supports[node_id]
+        self._invalidate_dof_map()
+
+    def remove_load(self, load_id: int):
+        """Removes a Load by ID."""
+        if load_id not in self.loads:
+            raise KeyError(f"Load with ID {load_id} not found.")
+        del self.loads[load_id]
+
+    # --- Validation ---
+
+    def validate(self) -> list[str]:
+        """
+        Performs consistency checks on the model.
+
+        Returns:
+            A list of error/warning messages. An empty list indicates a valid model.
+        """
+        errors = []
+
+        # 1. Member Checks
+        for mem_id, member in self.members.items():
+            # Check node existence (already partially done in add_member, but good to re-verify)
+            if member.start_node.id not in self.nodes:
+                errors.append(f"Member {mem_id}: Start node {member.start_node.id} not found in model nodes.")
+            if member.end_node.id not in self.nodes:
+                errors.append(f"Member {mem_id}: End node {member.end_node.id} not found in model nodes.")
+            # Check material/section existence (stored as objects, so type check is implicit)
+            if not isinstance(member.material, Material):
+                 errors.append(f"Member {mem_id}: Invalid material object assigned ({type(member.material)}).")
+            elif member.material.id not in self.materials:
+                 errors.append(f"Member {mem_id}: Material {member.material.id} not found in model materials.") # Check consistency
+            if not isinstance(member.section, SectionProfile):
+                 errors.append(f"Member {mem_id}: Invalid section object assigned ({type(member.section)}).")
+            elif member.section.id not in self.sections:
+                 errors.append(f"Member {mem_id}: Section {member.section.id} not found in model sections.") # Check consistency
+            # Check zero length (already done in Member init, but maybe re-check)
+            if member.length == approx(0.0):
+                 errors.append(f"Member {mem_id}: Member has zero length between nodes {member.start_node.id} and {member.end_node.id}.")
+
+        # 2. Support Checks
+        for node_id, support in self.supports.items():
+            if node_id not in self.nodes:
+                errors.append(f"Support defined for non-existent node {node_id}.")
+
+        # 3. Load Checks
+        for load_id, load in self.loads.items():
+            if isinstance(load, NodalLoad):
+                if load.node_id not in self.nodes:
+                    errors.append(f"NodalLoad {load_id}: Target node {load.node_id} not found.")
+            elif isinstance(load, MemberLoad):
+                if load.member_id not in self.members:
+                    errors.append(f"MemberLoad {load_id}: Target member {load.member_id} not found.")
+                else:
+                    # Check member-specific load validity
+                    member = self.get_member(load.member_id)
+                    if isinstance(load, MemberPointLoad):
+                        if load.position > member.length + 1e-9: # Allow slight tolerance for end node
+                             errors.append(f"MemberPointLoad {load_id} on Member {load.member_id}: Position {load.position} exceeds member length {member.length:.4g}.")
+                        # Position >= 0 already checked in MemberPointLoad __init__
+
+        # 4. Orphan Checks (Optional - could be warnings)
+        # Check for unused nodes, materials, sections? Might be valid in some workflows. Skip for now.
+
+        return errors
+
+    # --- DOF Mapping ---
+
+    def _invalidate_dof_map(self):
+        """Resets the cached DOF map when the model structure changes."""
+        self._dof_map = None
+        self._constrained_dofs = None
+        self._num_active_dofs = None
+
+    def _generate_dof_map(self):
+        """Internal method to generate the DOF map if it doesn't exist."""
+        if self._dof_map is not None:
+            return # Already generated
+
+        dof_map: dict[tuple[int, str], int] = {}
+        constrained_dofs: set[tuple[int, str]] = set()
+        active_dof_index = 0
+        dof_types = ['dx', 'dy', 'rz'] # Order matters!
+
+        # Sort nodes by ID for consistent DOF numbering
+        sorted_node_ids = sorted(self.nodes.keys())
+
+        for node_id in sorted_node_ids:
+            support = self.get_support(node_id)
+            is_constrained = {
+                'dx': support.is_dx_restrained if support else False,
+                'dy': support.is_dy_restrained if support else False,
+                'rz': support.is_rz_restrained if support else False,
+            }
+
+            for dof_name in dof_types:
+                node_dof_tuple = (node_id, dof_name)
+                if is_constrained[dof_name]:
+                    constrained_dofs.add(node_dof_tuple)
+                    # Optionally assign -1 or similar to map for constrained DOFs
+                    dof_map[node_dof_tuple] = -1
+                else:
+                    dof_map[node_dof_tuple] = active_dof_index
+                    active_dof_index += 1
+
+        self._dof_map = dof_map
+        self._constrained_dofs = constrained_dofs
+        self._num_active_dofs = active_dof_index
+
+    def get_dof_map(self) -> tuple[dict[tuple[int, str], int], set[tuple[int, str]], int]:
+        """
+        Generates and returns the global Degree-of-Freedom (DOF) mapping.
+
+        Returns:
+            A tuple containing:
+            - dof_map (dict): Maps (node_id, dof_name) to a global index (or -1 if constrained).
+                              dof_name is one of 'dx', 'dy', 'rz'.
+            - constrained_dofs (set): A set of (node_id, dof_name) tuples for constrained DOFs.
+            - num_active_dofs (int): The total number of unconstrained (active) DOFs in the model.
+        """
+        self._generate_dof_map()
+        # Ensure the attributes are not None after generation
+        if self._dof_map is None or self._constrained_dofs is None or self._num_active_dofs is None:
+             # This should not happen if _generate_dof_map works correctly
+             raise RuntimeError("DOF map generation failed unexpectedly.")
+        return self._dof_map, self._constrained_dofs, self._num_active_dofs
+
+    def get_active_dof_indices(self, node_id: int) -> list[int]:
+        """
+        Gets the global indices for the *active* DOFs associated with a specific node.
+
+        Args:
+            node_id: The ID of the node.
+
+        Returns:
+            A list of active global DOF indices for the node [dx_idx, dy_idx, rz_idx].
+            If a DOF is constrained, its index might be omitted or represented differently
+            depending on how the analysis engine expects it. This version returns only active indices.
+        """
+        self._generate_dof_map()
+        if self._dof_map is None:
+             raise RuntimeError("DOF map has not been generated.")
+
+        indices = []
+        for dof_name in ['dx', 'dy', 'rz']:
+            idx = self._dof_map.get((node_id, dof_name), -1) # Default to -1 if somehow missing
+            if idx != -1: # Only include active DOFs
+                indices.append(idx)
+        return indices
+
+
+    # --- Other Utility Methods (Optional) ---
+
+    def __str__(self) -> str:
+        """Basic summary string representation of the model."""
+        return (f"StructuralModel(name='{self.name}', "
+                f"Nodes={len(self.nodes)}, Materials={len(self.materials)}, Sections={len(self.sections)}, "
+                f"Members={len(self.members)}, Supports={len(self.supports)}, Loads={len(self.loads)})")
 
 
 # --- Example Usage (Optional) ---

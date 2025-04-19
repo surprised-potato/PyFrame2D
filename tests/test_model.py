@@ -330,3 +330,51 @@ def test_section_equality_across_types():
 
     section_set = {rect, square, ibeam}
     assert len(section_set) == 2 # Only two unique IDs
+
+def test_material_e_retrieval():
+    """Explicitly tests retrieval of the E property after creation."""
+    e_value = 195.5e9
+    mat = Material(id=6, name="Special Alloy", youngs_modulus=e_value)
+    assert mat.E == approx(e_value)
+
+    # Test retrieval after creation with string (if units enabled)
+    if UNITS_ENABLED:
+        mat_str = Material(id=7, name="Another Alloy", youngs_modulus="195.5 GPa")
+        assert mat_str.E == approx(e_value)
+
+
+def test_rectangular_thin_profile():
+    """Tests a rectangular profile with very different width and height."""
+    # Very wide, very thin
+    section1 = RectangularProfile(id=103, name="Plate", width=1.0, height=0.001)
+    assert section1.area == approx(1.0 * 0.001)
+    assert section1.moment_of_inertia == approx((1.0 * 0.001**3) / 12.0)
+
+    # Very tall, very narrow
+    section2 = RectangularProfile(id=104, name="Fin", width=0.002, height=0.5)
+    assert section2.area == approx(0.002 * 0.5)
+    assert section2.moment_of_inertia == approx((0.002 * 0.5**3) / 12.0)
+
+
+def test_ibeam_near_limits():
+    """Tests IBeamProfile with dimensions close to validation limits."""
+    # h just slightly larger than 2*tf (e.g., h=0.021, tf=0.01)
+    h, bf, tf, tw = 0.021, 0.05, 0.01, 0.005 # Ensure bf >= tw (0.05 >= 0.005)
+    section1 = IBeamProfile(id=303, name="Shallow I", height=h, flange_width=bf,
+                             flange_thickness=tf, web_thickness=tw)
+    # Just verify creation doesn't raise error and calculate basic properties
+    expected_area = 2*(bf*tf) + (h - 2*tf)*tw
+    expected_I = (bf * h**3 - (bf - tw) * (h - 2*tf)**3) / 12.0
+    assert section1.area == approx(expected_area)
+    assert section1.moment_of_inertia == approx(expected_I)
+
+    # bf just equal to tw (e.g., bf=0.005, tw=0.005)
+    h, bf, tf, tw = 0.1, 0.005, 0.01, 0.005 # Ensure h > 2*tf (0.1 > 0.02)
+    section2 = IBeamProfile(id=304, name="Narrow Flange I", height=h, flange_width=bf,
+                             flange_thickness=tf, web_thickness=tw)
+    expected_area = 2*(bf*tf) + (h - 2*tf)*tw
+    expected_I = (bf * h**3 - (bf - tw) * (h - 2*tf)**3) / 12.0 # Note: (bf-tw) term becomes zero here
+    assert section2.area == approx(expected_area)
+    assert section2.moment_of_inertia == approx(expected_I)
+    # Verify I simplifies correctly when bf=tw
+    assert section2.moment_of_inertia == approx((bf * h**3)/12.0)

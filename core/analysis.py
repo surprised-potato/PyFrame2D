@@ -610,7 +610,7 @@ def calculate_diagram_data(model: 'StructuralModel',
 
 # --- Main Analysis Runner Function ---
 
-def run_analysis(model: 'StructuralModel', num_diagram_points: int = 11) -> AnalysisResults:
+def analyze(model: 'StructuralModel', num_diagram_points: int = 11) -> AnalysisResults:
     """
     Performs the full structural analysis pipeline.
 
@@ -741,7 +741,7 @@ if __name__ == "__main__":
     # --- End model recreation ---
 
     # Run the analysis
-    analysis_results = run_analysis(model, num_diagram_points=5) # Calculate diagrams with 5 points
+    analysis_results = analyze(model, num_diagram_points=5) # Calculate diagrams with 5 points
 
     # Print summary of results
     print("\n--- Analysis Results ---")

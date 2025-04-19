@@ -12,7 +12,7 @@ from core.elements import local_stiffness_matrix, transformation_matrix
 from core.analysis import (assemble_global_stiffness, assemble_global_loads,
                            solve_system, reconstruct_full_displacement)
 from core.analysis import (calculate_member_forces, calculate_reactions,
-                           calculate_diagram_data, run_analysis, AnalysisResults)
+                           calculate_diagram_data, analyze, AnalysisResults)
 from numpy.linalg import LinAlgError
 
 try:
@@ -585,15 +585,15 @@ def test_calculate_member_forces_cantilever(cantilever_model_tip_load):
                          err_msg=f"Member force mismatch for Member {mem_id}")
 
 
-# === Tests for run_analysis and AnalysisResults ===
+# === Tests for analyze and AnalysisResults ===
 
 @pytest.mark.skipif(not MODEL_CLASSES_AVAILABLE, reason="Requires core.model classes")
 def test_run_analysis_success_cantilever(cantilever_model_tip_load):
-    """Tests the full run_analysis pipeline for a successful case."""
+    """Tests the full analyze pipeline for a successful case."""
     model = cantilever_model_tip_load
 
     # Run full analysis
-    results = run_analysis(model, num_diagram_points=11) # Request diagrams
+    results = analyze(model, num_diagram_points=11) # Request diagrams
 
     # --- Assertions on AnalysisResults ---
     assert results.status == "Success"
@@ -639,7 +639,7 @@ def test_run_analysis_success_cantilever(cantilever_model_tip_load):
 
 @pytest.mark.skipif(not MODEL_CLASSES_AVAILABLE, reason="Requires core.model classes")
 def test_run_analysis_singular():
-    """Tests run_analysis handles a singular matrix case."""
+    """Tests analyze handles a singular matrix case."""
     model = StructuralModel()
     # Unstable beam model
     n1 = Node(1, 0, 0); n2 = Node(2, 1, 0)
@@ -650,7 +650,7 @@ def test_run_analysis_singular():
     model.add_load(NodalLoad(1, n2.id, fy=1)) # Add load
 
     # Run analysis
-    results = run_analysis(model)
+    results = analyze(model)
 
     # Assertions
     assert results.status == "Singular Matrix"
@@ -662,7 +662,7 @@ def test_run_analysis_singular():
 
 
 def test_run_analysis_no_active_dofs():
-    """Tests run_analysis handles a fully constrained model."""
+    """Tests analyze handles a fully constrained model."""
     model = StructuralModel()
     n1 = Node(1, 0, 0); n2 = Node(2, 1, 0)
     model.add_node(n1); model.add_node(n2)
@@ -673,7 +673,7 @@ def test_run_analysis_no_active_dofs():
     model.add_support(Support.fixed(2))
     model.add_load(NodalLoad(1, n2.id, fy=1)) # Load exists but all DOFs constrained
 
-    results = run_analysis(model)
+    results = analyze(model)
 
     # Check status - should succeed but displacements will be zero
     assert results.status == "Success"

@@ -4,7 +4,9 @@ import pytest # type: ignore
 from pytest import approx  # type: ignore # For comparing floating-point numbers
 # Attempt to import the Node class (it doesn't exist yet, but we write the test assuming it will)
 
-from core.model import Node, Material, SectionProfile, RectangularProfile, SquareProfile, IBeamProfile
+from core.model import Node, Material, SectionProfile, RectangularProfile, SquareProfile, IBeamProfile, Member
+import math
+
 # Make sure UNITS_ENABLED is accessible if needed for skipping tests, or handle errors
 try:
     from units.units import UNITS_ENABLED
@@ -378,3 +380,152 @@ def test_ibeam_near_limits():
     assert section2.moment_of_inertia == approx(expected_I)
     # Verify I simplifies correctly when bf=tw
     assert section2.moment_of_inertia == approx((bf * h**3)/12.0)
+
+    from core.model import Member
+
+# --- Member Class Tests ---
+
+# Helper fixture to create nodes, material, section for member tests
+@pytest.fixture
+def basic_model_components():
+    """Provides common nodes, material, section for member tests."""
+    n1 = Node(id=1, x=0, y=0)
+    n2 = Node(id=2, x=5, y=0)      # Horizontal member N1->N2, length 5
+    n3 = Node(id=3, x=5, y=10)     # Vertical member N2->N3, length 10
+    n4 = Node(id=4, x=-3, y=4)     # Angled member N1->N4, length 5 (3-4-5 triangle)
+    n_dup = Node(id=1, x=1, y=1)   # Duplicate ID for zero-length test
+    mat = Material(id=1, name="Generic Steel", youngs_modulus=200e9)
+    sec = SquareProfile(id=101, name="SQ 100", side_length=0.1)
+    return {"n1": n1, "n2": n2, "n3": n3, "n4": n4, "n_dup": n_dup, "mat": mat, "sec": sec}
+
+def test_member_creation(basic_model_components):
+    """Tests basic Member creation and attribute assignment."""
+    n1, n2 = basic_model_components["n1"], basic_model_components["n2"]
+    mat, sec = basic_model_components["mat"], basic_model_components["sec"]
+
+    member = Member(id=1, start_node=n1, end_node=n2, material=mat, section=sec)
+
+    assert member.id == 1
+    assert member.start_node == n1
+    assert member.end_node == n2
+    assert member.material == mat
+    assert member.section == sec
+    # Check reference equality (should be the same objects)
+    assert member.start_node is n1
+    assert member.end_node is n2
+    assert member.material is mat
+    assert member.section is sec
+
+def test_member_length_calculation(basic_model_components):
+    """Tests the member length property calculation."""
+    n1 = basic_model_components["n1"]
+    n2 = basic_model_components["n2"]
+    n3 = basic_model_components["n3"]
+    n4 = basic_model_components["n4"]
+    mat = basic_model_components["mat"]
+    sec = basic_model_components["sec"]
+
+    mem_horiz = Member(id=2, start_node=n1, end_node=n2, material=mat, section=sec)
+    mem_vert = Member(id=3, start_node=n2, end_node=n3, material=mat, section=sec)
+    mem_angled = Member(id=4, start_node=n1, end_node=n4, material=mat, section=sec)
+
+    assert mem_horiz.length == approx(5.0)
+    assert mem_vert.length == approx(10.0)
+    assert mem_angled.length == approx(math.sqrt((-3 - 0)**2 + (4 - 0)**2)) # sqrt(9+16)=5
+    assert mem_angled.length == approx(5.0)
+
+def test_member_angle_calculation(basic_model_components):
+    """Tests the member angle property calculation (in radians)."""
+    n1 = basic_model_components["n1"]
+    n2 = basic_model_components["n2"]
+    n3 = basic_model_components["n3"]
+    n4 = basic_model_components["n4"]
+    mat = basic_model_components["mat"]
+    sec = basic_model_components["sec"]
+
+    mem_horiz = Member(id=5, start_node=n1, end_node=n2, material=mat, section=sec) # 0 degrees
+    mem_vert = Member(id=6, start_node=n2, end_node=n3, material=mat, section=sec)  # 90 degrees
+    mem_angled = Member(id=7, start_node=n1, end_node=n4, material=mat, section=sec)# Angle in Q2
+    mem_neg_horiz = Member(id=8, start_node=n2, end_node=n1, material=mat, section=sec) # 180 degrees (-pi rad)
+    mem_neg_vert = Member(id=9, start_node=n3, end_node=n2, material=mat, section=sec)  # -90 degrees (-pi/2 rad)
+
+    assert mem_horiz.angle == approx(0.0)
+    assert mem_vert.angle == approx(math.pi / 2.0)
+    assert mem_angled.angle == approx(math.atan2(4, -3)) # approx 2.214 rad or 126.87 deg
+    assert mem_neg_horiz.angle == approx(math.pi)        # atan2(-0, -5) -> pi
+    assert mem_neg_vert.angle == approx(-math.pi / 2.0)
+
+def test_member_property_accessors(basic_model_components):
+    """Tests the convenience properties E, A, I."""
+    n1, n2 = basic_model_components["n1"], basic_model_components["n2"]
+    mat, sec = basic_model_components["mat"], basic_model_components["sec"]
+    member = Member(id=10, start_node=n1, end_node=n2, material=mat, section=sec)
+
+    assert member.E == approx(mat.E)
+    assert member.A == approx(sec.area)
+    assert member.I == approx(sec.moment_of_inertia)
+
+def test_member_repr_and_str(basic_model_components):
+    """Tests Member string representations."""
+    n1, n2 = basic_model_components["n1"], basic_model_components["n2"]
+    mat, sec = basic_model_components["mat"], basic_model_components["sec"]
+    member = Member(id=11, start_node=n1, end_node=n2, material=mat, section=sec)
+
+    expected_repr = ("Member(id=11, start_node=Node(id=1), end_node=Node(id=2), "
+                     "material=Material(id=1), section=SquareProfile(id=101))")
+    expected_str = "Member 11 (Nodes: 1 -> 2, Material: 1, Section: 101)"
+
+    assert repr(member) == expected_repr
+    assert str(member) == expected_str
+
+def test_member_equality_and_hash(basic_model_components):
+    """Tests Member equality and hashing based on ID."""
+    n1, n2, n3 = basic_model_components["n1"], basic_model_components["n2"], basic_model_components["n3"]
+    mat, sec = basic_model_components["mat"], basic_model_components["sec"]
+
+    mem1a = Member(id=20, start_node=n1, end_node=n2, material=mat, section=sec)
+    mem1b = Member(id=20, start_node=n2, end_node=n3, material=mat, section=sec) # Same ID
+    mem2 = Member(id=21, start_node=n1, end_node=n3, material=mat, section=sec)
+
+    assert mem1a == mem1b
+    assert mem1a != mem2
+    assert hash(mem1a) == hash(mem1b)
+    assert hash(mem1a) != hash(mem2)
+    assert mem1a != "string"
+
+    mem_set = {mem1a, mem1b, mem2}
+    assert len(mem_set) == 2 # Only two unique IDs
+
+
+def test_member_invalid_inputs(basic_model_components):
+    """Tests invalid inputs during Member initialization."""
+    n1, n2 = basic_model_components["n1"], basic_model_components["n2"]
+    n_dup = basic_model_components["n_dup"] # Same ID as n1 but different coords
+    mat, sec = basic_model_components["mat"], basic_model_components["sec"]
+
+    # Invalid ID
+    with pytest.raises(TypeError, match="Member ID must be an integer"):
+        Member(id="abc", start_node=n1, end_node=n2, material=mat, section=sec)
+    # Invalid Node types
+    with pytest.raises(TypeError, match="Member start_node must be a Node object"):
+        Member(id=1, start_node="n1", end_node=n2, material=mat, section=sec)
+    with pytest.raises(TypeError, match="Member end_node must be a Node object"):
+        Member(id=1, start_node=n1, end_node=None, material=mat, section=sec)
+    # Invalid Material type
+    with pytest.raises(TypeError, match="Member material must be a Material object"):
+        Member(id=1, start_node=n1, end_node=n2, material="mat", section=sec)
+    # Invalid Section type
+    with pytest.raises(TypeError, match="Member section must be a SectionProfile object"):
+        Member(id=1, start_node=n1, end_node=n2, material=mat, section=n1) # Pass node as section
+
+    # Zero-length member (based on coordinates)
+    with pytest.raises(ValueError, match="Member start and end node coordinates are identical"): # Correct match
+        node_a = Node(id=1001, x=10, y=10)
+        node_b = Node(id=1002, x=10, y=10) # Different ID, same coordinates
+        Member(id=1, start_node=node_a, end_node=node_b, material=mat, section=sec)
+
+    # Let's test the case where IDs are same but coords differ - this should NOT raise ValueError
+    try:
+        Member(id=1, start_node=n1, end_node=n_dup, material=mat, section=sec)
+    except ValueError:
+        pytest.fail("ValueError raised unexpectedly for nodes with same ID but different coordinates.")

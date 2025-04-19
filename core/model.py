@@ -490,27 +490,174 @@ class IBeamProfile(SectionProfile):
                 f"(I-Beam h={self.height:.3g}m, bf={self.flange_width:.3g}m, "
                 f"tf={self.flange_thickness:.3g}m, tw={self.web_thickness:.3g}m)")
 
+class Member:
+    """
+    Represents a 2D frame member connecting two nodes.
+
+    Attributes:
+        id (int): A unique integer identifier for the member.
+        start_node (Node): The Node object at the start of the member.
+        end_node (Node): The Node object at the end of the member.
+        material (Material): The Material object assigned to this member.
+        section (SectionProfile): The SectionProfile object assigned to this member.
+    """
+    def __init__(self, id: int, start_node: Node, end_node: Node, material: Material, section: SectionProfile):
+        """
+        Initializes a Member object.
+
+        Args:
+            id: The unique integer identifier for the member.
+            start_node: The starting Node object.
+            end_node: The ending Node object.
+            material: The Material object for this member.
+            section: The SectionProfile object for this member.
+
+        Raises:
+            TypeError: If id is not an integer, or if start_node/end_node are not Node objects,
+                       or if material is not a Material object, or section is not a SectionProfile object.
+            ValueError: If start_node and end_node refer to the same node (zero-length member).
+        """
+        if not isinstance(id, int):
+            raise TypeError(f"Member ID must be an integer (received: {id}, type: {type(id)}).")
+        if not isinstance(start_node, Node):
+            raise TypeError(f"Member start_node must be a Node object (received: {start_node}, type: {type(start_node)}).")
+        if not isinstance(end_node, Node):
+            raise TypeError(f"Member end_node must be a Node object (received: {end_node}, type: {type(end_node)}).")
+        if not isinstance(material, Material):
+             raise TypeError(f"Member material must be a Material object (received: {material}, type: {type(material)}).")
+        if not isinstance(section, SectionProfile):
+            raise TypeError(f"Member section must be a SectionProfile object (received: {section}, type: {type(section)}).")
+
+         # --- Corrected Zero-Length Check ---
+        # Check coordinates *first* to detect zero length regardless of node IDs
+        if start_node.get_coords() == end_node.get_coords():
+            # Provide coordinates in the error message for clarity
+            coords = start_node.get_coords()
+            raise ValueError(f"Member start and end node coordinates are identical ({coords}). Member must have non-zero length.")
+        # --- End Correction ---
+        self.id = id
+        self.start_node = start_node
+        self.end_node = end_node
+        self.material = material
+        self.section = section
+        # Future attributes like end_releases can be added here
+
+    @property
+    def length(self) -> float:
+        """
+        Calculates the length of the member based on its node coordinates.
+
+        Returns:
+            The member length in meters.
+        """
+        x1, y1 = self.start_node.get_coords()
+        x2, y2 = self.end_node.get_coords()
+        dx = x2 - x1
+        dy = y2 - y1
+        return math.sqrt(dx**2 + dy**2)
+
+    @property
+    def angle(self) -> float:
+        """
+        Calculates the angle of the member relative to the global positive X-axis.
+
+        Returns:
+            The angle in radians, typically in the range (-pi, pi].
+        """
+        x1, y1 = self.start_node.get_coords()
+        x2, y2 = self.end_node.get_coords()
+        dx = x2 - x1
+        dy = y2 - y1
+        # atan2 handles quadrants correctly and the case dx=0
+        # If dx=0 and dy=0 (zero length), math.atan2(0, 0) returns 0.0.
+        # We already check for zero length in __init__, so this case shouldn't be reached
+        # under normal circumstances if __init__ validation is correct.
+        return math.atan2(dy, dx)
+
+    # --- Methods providing material/section properties ---
+    # Convenience methods to avoid accessing nested objects everywhere
+
+    @property
+    def E(self) -> float:
+        """Young's Modulus (E) of the member's material (in Pa)."""
+        return self.material.E
+
+    @property
+    def A(self) -> float:
+        """Cross-sectional area (A) of the member's section (in m^2)."""
+        return self.section.area
+
+    @property
+    def I(self) -> float:
+        """Moment of inertia (I) of the member's section (in m^4)."""
+        return self.section.moment_of_inertia
+
+    # --- Standard Python methods ---
+
+    def __repr__(self) -> str:
+        """Provides an unambiguous string representation."""
+        return (f"Member(id={self.id}, start_node=Node(id={self.start_node.id}), "
+                f"end_node=Node(id={self.end_node.id}), material=Material(id={self.material.id}), "
+                f"section={self.section.__class__.__name__}(id={self.section.id}))")
+
+    def __str__(self) -> str:
+        """Provides a user-friendly string representation."""
+        return (f"Member {self.id} (Nodes: {self.start_node.id} -> {self.end_node.id}, "
+                f"Material: {self.material.id}, Section: {self.section.id})")
+
+    def __eq__(self, other) -> bool:
+        """Checks equality based on member ID."""
+        if not isinstance(other, Member):
+            return NotImplemented
+        return self.id == other.id
+
+    def __ne__(self, other) -> bool:
+        """Checks inequality."""
+        equal = self.__eq__(other)
+        return NotImplemented if equal is NotImplemented else not equal
+
+    def __hash__(self) -> int:
+        """Computes hash based on member ID."""
+        return hash(self.id)
+
 # --- Example Usage (Optional) ---
 if __name__ == "__main__":
-    n1 = Node(1, 0.0, 0.0)
-    n2 = Node(id=2, x=5.0, y=10.5)
-    n1_again = Node(1, 1.0, 1.0) # Different coords, same ID
+    # Create dummy nodes, material, section for demonstration
+    n1 = Node(1, 0, 0)
+    n2 = Node(2, 4, 0) # Horizontal
+    n3 = Node(3, 4, 3) # Angled
+    n4 = Node(4, 0, 3) # Vertical
+    mat1 = Material(1, "Steel", 210e9)
+    sec1 = RectangularProfile(101, "Rect 10x20", 0.1, 0.2)
 
-    print(n1)
-    print(repr(n2))
-    print(f"Coordinates of {n1}: {n1.get_coords()}")
-    print(f"Is n1 equal to n2? {n1 == n2}")
-    print(f"Is n1 equal to n1_again? {n1 == n1_again}")
+    mem1 = Member(id=10, start_node=n1, end_node=n2, material=mat1, section=sec1) # Horizontal
+    mem2 = Member(id=11, start_node=n2, end_node=n3, material=mat1, section=sec1) # Angled (3-4-5 triangle)
+    mem3 = Member(id=12, start_node=n1, end_node=n4, material=mat1, section=sec1) # Vertical
 
-    node_set = {n1, n2, n1_again}
-    print(f"Set of nodes: {node_set}") # Should only contain Node 1 and Node 2
+    print(repr(mem1))
+    print(str(mem2))
+    print(f"Member 1: Length={mem1.length:.4f} m, Angle={math.degrees(mem1.angle):.2f} deg")
+    print(f"Member 2: Length={mem2.length:.4f} m, Angle={math.degrees(mem2.angle):.2f} deg") # ~36.87 deg
+    print(f"Member 3: Length={mem3.length:.4f} m, Angle={math.degrees(mem3.angle):.2f} deg") # 90 deg
+
+    print(f"Member 1 Properties: E={mem1.E:.2e} Pa, A={mem1.A:.4f} m^2, I={mem1.I:.4e} m^4")
+
+    # Example of equality
+    mem1_again = Member(id=10, start_node=n1, end_node=n3, material=mat1, section=sec1) # Same ID, different nodes
+    print(f"mem1 == mem2: {mem1 == mem2}")
+    print(f"mem1 == mem1_again: {mem1 == mem1_again}")
+
+    member_set = {mem1, mem2, mem3, mem1_again}
+    print(f"Set of members: {member_set}")
 
     try:
-        Node("A", 0, 0)
-    except TypeError as e:
+        # Zero length member
+        Member(id=99, start_node=n1, end_node=n1, material=mat1, section=sec1)
+    except ValueError as e:
         print(f"Caught expected error: {e}")
 
     try:
-        Node(3, "hello", 0)
+        # Invalid type for node
+        Member(id=98, start_node="node1", end_node=n2, material=mat1, section=sec1)
     except TypeError as e:
         print(f"Caught expected error: {e}")

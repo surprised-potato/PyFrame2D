@@ -5,6 +5,7 @@ from pytest import approx  # type: ignore # For comparing floating-point numbers
 # Attempt to import the Node class (it doesn't exist yet, but we write the test assuming it will)
 
 from core.model import Node, Material, SectionProfile, RectangularProfile, SquareProfile, IBeamProfile, Member
+from core.model import Support, Load, NodalLoad, MemberLoad, MemberPointLoad, MemberUDLoad
 import math
 
 # Make sure UNITS_ENABLED is accessible if needed for skipping tests, or handle errors
@@ -529,3 +530,213 @@ def test_member_invalid_inputs(basic_model_components):
         Member(id=1, start_node=n1, end_node=n_dup, material=mat, section=sec)
     except ValueError:
         pytest.fail("ValueError raised unexpectedly for nodes with same ID but different coordinates.")
+
+def test_support_creation_direct():
+    """Tests direct creation of Support object."""
+    support = Support(node_id=1, dx=True, dy=True, rz=False) # Pinned
+    assert support.node_id == 1
+    assert support.is_dx_restrained is True
+    assert support.is_dy_restrained is True
+    assert support.is_rz_restrained is False
+
+def test_support_creation_classmethods():
+    """Tests creation using classmethod constructors."""
+    fixed = Support.fixed(node_id=2)
+    pinned = Support.pinned(node_id=3)
+    roller_x = Support.roller_x(node_id=4) # Restrains dy
+    roller_y = Support.roller_y(node_id=5) # Restrains dx
+
+    assert fixed.node_id == 2 and fixed.dx and fixed.dy and fixed.rz
+    assert pinned.node_id == 3 and pinned.dx and pinned.dy and not pinned.rz
+    assert roller_x.node_id == 4 and not roller_x.dx and roller_x.dy and not roller_x.rz
+    assert roller_y.node_id == 5 and roller_y.dx and not roller_y.dy and not roller_y.rz
+
+def test_support_repr_and_str():
+    """Tests Support string representations."""
+    fixed = Support.fixed(node_id=1)
+    pinned = Support.pinned(node_id=2)
+    roller_x = Support.roller_x(node_id=3)
+    custom = Support(node_id=4, dx=False, dy=False, rz=True)
+
+    assert repr(fixed) == "Support(node_id=1, dx=True, dy=True, rz=True)"
+    assert str(fixed) == "Support @ Node 1: Restrains DX+DY+RZ (Fixed)"
+    assert str(pinned) == "Support @ Node 2: Restrains DX+DY (Pinned)"
+    assert str(roller_x) == "Support @ Node 3: Restrains DY (Roller X)"
+    assert str(custom) == "Support @ Node 4: Restrains RZ" # No specific name
+
+def test_support_equality_and_hash():
+    """Tests Support equality (based on node_id)."""
+    sup1a = Support.fixed(node_id=10)
+    sup1b = Support.pinned(node_id=10) # Different constraints, same node
+    sup2 = Support.fixed(node_id=20)
+
+    assert sup1a == sup1b # Equal based on node_id
+    assert sup1a != sup2
+    assert hash(sup1a) == hash(sup1b)
+    assert hash(sup1a) != hash(sup2)
+    assert sup1a != "string"
+
+    support_set = {sup1a, sup1b, sup2}
+    assert len(support_set) == 2 # Only two unique node IDs
+
+def test_support_invalid_inputs():
+    """Tests invalid inputs during Support initialization."""
+    # Invalid node_id type
+    with pytest.raises(TypeError, match="Support node_id must be an integer"):
+        Support("1", dx=True, dy=True, rz=True)
+    # Invalid restraint type
+    with pytest.raises(TypeError, match="Support restraints .* must be boolean"):
+        Support(1, dx="True", dy=True, rz=True)
+    with pytest.raises(TypeError, match="Support restraints .* must be boolean"):
+        Support(1, dx=True, dy=1, rz=True)
+
+
+# --- NodalLoad Class Tests ---
+
+def test_nodalload_creation():
+    """Tests NodalLoad creation with forces and moments."""
+    load1 = NodalLoad(id=101, node_id=1, fx=1000.0, fy=-500.0)
+    load2 = NodalLoad(id=102, node_id=2, mz=1500.0, label="Wind Moment")
+
+    assert load1.id == 101 and load1.node_id == 1
+    assert load1.fx == approx(1000.0) and load1.fy == approx(-500.0) and load1.mz == approx(0.0)
+    assert load1.label == ""
+
+    assert load2.id == 102 and load2.node_id == 2
+    assert load2.fx == approx(0.0) and load2.fy == approx(0.0) and load2.mz == approx(1500.0)
+    assert load2.label == "Wind Moment"
+
+def test_nodalload_repr_and_str():
+    """Tests NodalLoad string representations."""
+    load = NodalLoad(id=103, node_id=5, fx=-2.5e3, mz=1.2e3, label=" Crane ")
+
+    expected_repr = "NodalLoad(id=103, node_id=5, fx=-2500.0, fy=0.0, mz=1200.0, label='Crane')"
+    expected_str = "NodalLoad 103 @ Node 5: Fx=-2.5e+03 N, Fy=0 N, Mz=1.2e+03 Nm (Crane)"
+
+    assert repr(load) == expected_repr
+    assert str(load) == expected_str
+
+
+def test_nodalload_invalid_inputs():
+    """Tests invalid inputs during NodalLoad initialization."""
+    # Invalid ID / node_id
+    with pytest.raises(TypeError, match="Load ID must be an integer"):
+        NodalLoad(id="L1", node_id=1)
+    with pytest.raises(TypeError, match="NodalLoad node_id must be an integer"):
+        NodalLoad(id=1, node_id=1.0)
+    # Invalid label
+    with pytest.raises(TypeError, match="Load label must be a string"):
+        NodalLoad(id=1, node_id=1, label=123)
+    # Invalid force/moment types
+    with pytest.raises(TypeError, match="NodalLoad components .* must be numeric"):
+        NodalLoad(id=1, node_id=1, fx="100")
+    with pytest.raises(TypeError, match="NodalLoad components .* must be numeric"):
+        NodalLoad(id=1, node_id=1, fy=None)
+    with pytest.raises(TypeError, match="NodalLoad components .* must be numeric"):
+        NodalLoad(id=1, node_id=1, mz=[100])
+
+
+# --- MemberLoad Base Class Tests ---
+
+def test_memberload_cannot_instantiate():
+    """Verifies that the abstract MemberLoad class cannot be instantiated."""
+    with pytest.raises(TypeError, match="Can't instantiate abstract class MemberLoad"):
+        MemberLoad(id=201, member_id=1)
+
+
+# --- MemberPointLoad Class Tests ---
+
+def test_memberpointload_creation():
+    """Tests MemberPointLoad creation."""
+    load = MemberPointLoad(id=301, member_id=10, px=0.0, py=-1000.0, position=2.5, label="Mid span load")
+
+    assert load.id == 301 and load.member_id == 10
+    assert load.px == approx(0.0)
+    assert load.py == approx(-1000.0)
+    assert load.position == approx(2.5)
+    assert load.label == "Mid span load"
+
+def test_memberpointload_repr_and_str():
+    """Tests MemberPointLoad string representations."""
+    load = MemberPointLoad(id=302, member_id=11, px=500, py=0, position=0) # Load at start
+
+    expected_repr = "MemberPointLoad(id=302, member_id=11, px=500.0, py=0.0, position=0.0)"
+    expected_str = "MemberPointLoad 302 on Member 11: Px=500 N, Py=0 N @ 0 m"
+
+    assert repr(load) == expected_repr
+    assert str(load) == expected_str
+
+def test_memberpointload_invalid_inputs():
+    """Tests invalid inputs for MemberPointLoad."""
+    # Invalid ID / member_id / label (inherited checks)
+    with pytest.raises(TypeError): MemberPointLoad(id="L1", member_id=1, px=0, py=0, position=1)
+    with pytest.raises(TypeError): MemberPointLoad(id=1, member_id="M1", px=0, py=0, position=1)
+    with pytest.raises(TypeError): MemberPointLoad(id=1, member_id=1, px=0, py=0, position=1, label=None)
+    # Invalid numeric types
+    with pytest.raises(TypeError, match="MemberPointLoad components .* must be numeric"):
+        MemberPointLoad(id=1, member_id=1, px="a", py=0, position=1)
+    with pytest.raises(TypeError, match="MemberPointLoad components .* must be numeric"):
+        MemberPointLoad(id=1, member_id=1, px=0, py="b", position=1)
+    with pytest.raises(TypeError, match="MemberPointLoad components .* must be numeric"):
+        MemberPointLoad(id=1, member_id=1, px=0, py=0, position="c")
+    # Invalid position value
+    with pytest.raises(ValueError, match="MemberPointLoad position .* cannot be negative"):
+        MemberPointLoad(id=1, member_id=1, px=0, py=0, position=-1.0)
+
+
+# --- MemberUDLoad Class Tests ---
+
+def test_memberudload_creation():
+    """Tests MemberUDLoad creation."""
+    load = MemberUDLoad(id=401, member_id=12, wx=0.0, wy=-500.0, label="Gravity load") # Perpendicular load
+
+    assert load.id == 401 and load.member_id == 12
+    assert load.wx == approx(0.0)
+    assert load.wy == approx(-500.0)
+    assert load.label == "Gravity load"
+
+def test_memberudload_defaults():
+    """Tests default values for MemberUDLoad."""
+    load = MemberUDLoad(id=402, member_id=13) # No wx, wy specified
+    assert load.wx == approx(0.0)
+    assert load.wy == approx(0.0)
+
+def test_memberudload_repr_and_str():
+    """Tests MemberUDLoad string representations."""
+    load = MemberUDLoad(id=403, member_id=14, wx=50, wy=10, label="Wind + SelfWeight")
+
+    expected_repr = "MemberUDLoad(id=403, member_id=14, wx=50.0, wy=10.0, label='Wind + SelfWeight')"
+    expected_str = "MemberUDLoad 403 on Member 14: wx=50 N/m, wy=10 N/m (Wind + SelfWeight)"
+
+    assert repr(load) == expected_repr
+    assert str(load) == expected_str
+
+def test_memberudload_invalid_inputs():
+    """Tests invalid inputs for MemberUDLoad."""
+    # Invalid ID / member_id / label (inherited checks)
+    with pytest.raises(TypeError): MemberUDLoad(id="L1", member_id=1)
+    with pytest.raises(TypeError): MemberUDLoad(id=1, member_id="M1")
+    with pytest.raises(TypeError): MemberUDLoad(id=1, member_id=1, label=None)
+    # Invalid numeric types
+    with pytest.raises(TypeError, match="MemberUDLoad components .* must be numeric"):
+        MemberUDLoad(id=1, member_id=1, wx="a")
+    with pytest.raises(TypeError, match="MemberUDLoad components .* must be numeric"):
+        MemberUDLoad(id=1, member_id=1, wy=None)
+
+
+# --- Load Equality Across Types ---
+
+def test_load_equality_across_types():
+    """Tests that loads compare based on ID, even if types differ."""
+    load1 = NodalLoad(id=500, node_id=1, fx=100)
+    load2 = MemberPointLoad(id=500, member_id=1, px=0, py=-100, position=1.0) # Same ID
+    load3 = NodalLoad(id=501, node_id=2, fy=200)
+
+    assert load1 == load2 # Equal based on ID only
+    assert load1 != load3
+    assert load2 != load3
+    assert hash(load1) == hash(load2)
+    assert hash(load1) != hash(load3)
+
+    load_set = {load1, load2, load3}
+    assert len(load_set) == 2 # Only two unique IDs

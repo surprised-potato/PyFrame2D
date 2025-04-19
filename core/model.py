@@ -620,6 +620,345 @@ class Member:
         """Computes hash based on member ID."""
         return hash(self.id)
 
+class Support:
+    """
+    Represents a support condition applied to a node.
+
+    Defines constraints on the node's Degrees of Freedom (DOFs).
+
+    Attributes:
+        node_id (int): The ID of the node where the support is applied.
+        dx (bool): True if translation along the global X-axis is restrained.
+        dy (bool): True if translation along the global Y-axis is restrained.
+        rz (bool): True if rotation about the global Z-axis is restrained.
+    """
+    def __init__(self, node_id: int, dx: bool, dy: bool, rz: bool):
+        """
+        Initializes a Support object.
+
+        Args:
+            node_id: The ID of the node to support.
+            dx: Restraint against global X translation.
+            dy: Restraint against global Y translation.
+            rz: Restraint against global Z rotation.
+
+        Raises:
+            TypeError: If node_id is not an integer or dx/dy/rz are not booleans.
+        """
+        if not isinstance(node_id, int):
+            raise TypeError(f"Support node_id must be an integer (received: {node_id}).")
+        if not all(isinstance(val, bool) for val in [dx, dy, rz]):
+            raise TypeError("Support restraints (dx, dy, rz) must be boolean values.")
+
+        self.node_id = node_id
+        self.dx = dx
+        self.dy = dy
+        self.rz = rz
+
+    @classmethod
+    def fixed(cls, node_id: int):
+        """Creates a fully fixed support (restrains dx, dy, rz)."""
+        return cls(node_id, dx=True, dy=True, rz=True)
+
+    @classmethod
+    def pinned(cls, node_id: int):
+        """Creates a pinned support (restrains dx, dy; allows rz)."""
+        return cls(node_id, dx=True, dy=True, rz=False)
+
+    @classmethod
+    def roller_x(cls, node_id: int):
+        """Creates a roller support allowing X-translation (restrains dy; allows dx, rz)."""
+        return cls(node_id, dx=False, dy=True, rz=False)
+
+    @classmethod
+    def roller_y(cls, node_id: int):
+        """Creates a roller support allowing Y-translation (restrains dx; allows dy, rz)."""
+        return cls(node_id, dx=True, dy=False, rz=False)
+
+    @property
+    def is_dx_restrained(self) -> bool:
+        """Returns True if DX translation is restrained."""
+        return self.dx
+
+    @property
+    def is_dy_restrained(self) -> bool:
+        """Returns True if DY translation is restrained."""
+        return self.dy
+
+    @property
+    def is_rz_restrained(self) -> bool:
+        """Returns True if RZ rotation is restrained."""
+        return self.rz
+
+    def __repr__(self) -> str:
+        """Unambiguous representation."""
+        return f"Support(node_id={self.node_id}, dx={self.dx}, dy={self.dy}, rz={self.rz})"
+
+    def __str__(self) -> str:
+        """User-friendly representation."""
+        constraints = []
+        if self.dx: constraints.append("DX")
+        if self.dy: constraints.append("DY")
+        if self.rz: constraints.append("RZ")
+        constraint_str = "+".join(constraints) if constraints else "Free"
+        # Determine common type name
+        type_str = ""
+        if self.dx and self.dy and self.rz: type_str = " (Fixed)"
+        elif self.dx and self.dy and not self.rz: type_str = " (Pinned)"
+        elif not self.dx and self.dy and not self.rz: type_str = " (Roller X)"
+        elif self.dx and not self.dy and not self.rz: type_str = " (Roller Y)"
+        return f"Support @ Node {self.node_id}: Restrains {constraint_str}{type_str}"
+
+    def __eq__(self, other) -> bool:
+        """Equality based on node_id. Assumes only one support per node."""
+        if not isinstance(other, Support):
+            return NotImplemented
+        return self.node_id == other.node_id
+
+    def __ne__(self, other) -> bool:
+        """Checks inequality."""
+        equal = self.__eq__(other)
+        return NotImplemented if equal is NotImplemented else not equal
+
+    def __hash__(self) -> int:
+        """Hash based on node_id."""
+        return hash(self.node_id)
+
+
+# --- Load Base Class ---
+
+class Load(ABC):
+    """
+    Abstract Base Class for all load types.
+
+    Attributes:
+        id (int): Unique integer identifier for the load.
+        label (str): Optional descriptive label for the load.
+    """
+    def __init__(self, id: int, label: str = ""):
+        """
+        Initializes the base load.
+
+        Args:
+            id: Unique integer identifier.
+            label: Optional descriptive label.
+
+        Raises:
+            TypeError: If id is not an integer or label is not a string.
+        """
+        if not isinstance(id, int):
+            raise TypeError(f"Load ID must be an integer (received: {id}).")
+        if not isinstance(label, str):
+            raise TypeError(f"Load label must be a string (received: {label}).")
+        self.id = id
+        self.label = label.strip()
+
+    def __eq__(self, other) -> bool:
+        """Equality based on load ID."""
+        if not isinstance(other, Load):
+            return NotImplemented
+        return self.id == other.id
+
+    def __ne__(self, other) -> bool:
+        """Checks inequality."""
+        equal = self.__eq__(other)
+        return NotImplemented if equal is NotImplemented else not equal
+
+    def __hash__(self) -> int:
+        """Hash based on load ID."""
+        return hash(self.id)
+
+    @abstractmethod
+    def __repr__(self) -> str:
+        pass # pragma: no cover
+
+    @abstractmethod
+    def __str__(self) -> str:
+        pass # pragma: no cover
+
+
+# --- Nodal Load Class ---
+
+class NodalLoad(Load):
+    """
+    Represents a concentrated load (forces and/or moment) applied directly to a node.
+
+    Attributes:
+        node_id (int): The ID of the node where the load is applied.
+        fx (float): Force component in the global X direction (in Newtons, N).
+        fy (float): Force component in the global Y direction (in Newtons, N).
+        mz (float): Moment component about the global Z axis (in Newton-meters, N·m).
+    """
+    def __init__(self, id: int, node_id: int, fx: float = 0.0, fy: float = 0.0, mz: float = 0.0, label: str = ""):
+        """
+        Initializes a NodalLoad.
+
+        Args:
+            id: Unique load identifier.
+            node_id: ID of the target node.
+            fx: Global X-force component (N). Defaults to 0.0.
+            fy: Global Y-force component (N). Defaults to 0.0.
+            mz: Global Z-moment component (N·m). Defaults to 0.0.
+            label: Optional descriptive label.
+
+        Raises:
+            TypeError: If id/node_id are not integers, or fx/fy/mz are not numeric, or label is not string.
+        """
+        super().__init__(id, label)
+        if not isinstance(node_id, int):
+            raise TypeError(f"NodalLoad node_id must be an integer (received: {node_id}).")
+        if not all(isinstance(val, (int, float)) for val in [fx, fy, mz]):
+            raise TypeError("NodalLoad components (fx, fy, mz) must be numeric.")
+
+        self.node_id = node_id
+        self.fx = float(fx)
+        self.fy = float(fy)
+        self.mz = float(mz)
+
+    def __repr__(self) -> str:
+        """Unambiguous representation."""
+        label_part = f", label='{self.label}'" if self.label else ""
+        return (f"NodalLoad(id={self.id}, node_id={self.node_id}, "
+                f"fx={self.fx}, fy={self.fy}, mz={self.mz}{label_part})")
+
+    def __str__(self) -> str:
+        """User-friendly representation."""
+        label_part = f" ({self.label})" if self.label else ""
+        return (f"NodalLoad {self.id} @ Node {self.node_id}: "
+                f"Fx={self.fx:.3g} N, Fy={self.fy:.3g} N, Mz={self.mz:.3g} Nm{label_part}")
+
+
+# --- Member Load Base Class ---
+
+class MemberLoad(Load, ABC):
+    """
+    Abstract Base Class for loads applied along the length of a member.
+
+    Attributes:
+        member_id (int): The ID of the member the load is applied to.
+    """
+    def __init__(self, id: int, member_id: int, label: str = ""):
+        """
+        Initializes the base member load.
+
+        Args:
+            id: Unique load identifier.
+            member_id: ID of the target member.
+            label: Optional descriptive label.
+
+        Raises:
+            TypeError: If id/member_id are not integers or label is not string.
+        """
+        super().__init__(id, label)
+        if not isinstance(member_id, int):
+             raise TypeError(f"{self.__class__.__name__} member_id must be an integer (received: {member_id}).")
+        self.member_id = member_id
+
+
+# --- Member Point Load ---
+
+class MemberPointLoad(MemberLoad):
+    """
+    Represents a concentrated force applied at a specific point along a member's length.
+    Forces are defined in the member's local coordinate system.
+
+    Attributes:
+        px (float): Force component parallel to the member's local x-axis (N).
+                    Positive acts from start node towards end node.
+        py (float): Force component perpendicular to the member's local x-axis (N).
+                    Positive usually follows the right-hand rule (e.g., upwards for horizontal member).
+        position (float): The distance from the member's start node where the load is applied (m).
+                          Must be non-negative. Validation against member length happens later.
+    """
+    def __init__(self, id: int, member_id: int, px: float, py: float, position: float, label: str = ""):
+        """
+        Initializes a MemberPointLoad.
+
+        Args:
+            id: Unique load identifier.
+            member_id: ID of the target member.
+            px: Local x-force component (N).
+            py: Local y-force component (N).
+            position: Distance from start node (m). Must be >= 0.
+            label: Optional descriptive label.
+
+        Raises:
+            TypeError: If id/member_id not int; px/py/position not numeric; label not string.
+            ValueError: If position is negative.
+        """
+        super().__init__(id, member_id, label)
+        if not all(isinstance(val, (int, float)) for val in [px, py, position]):
+             raise TypeError("MemberPointLoad components (px, py, position) must be numeric.")
+        if position < 0:
+            raise ValueError(f"MemberPointLoad position ({position}) cannot be negative.")
+
+        self.px = float(px)
+        self.py = float(py)
+        self.position = float(position)
+
+    def __repr__(self) -> str:
+        """Unambiguous representation."""
+        label_part = f", label='{self.label}'" if self.label else ""
+        return (f"MemberPointLoad(id={self.id}, member_id={self.member_id}, "
+                f"px={self.px}, py={self.py}, position={self.position}{label_part})")
+
+    def __str__(self) -> str:
+        """User-friendly representation."""
+        label_part = f" ({self.label})" if self.label else ""
+        return (f"MemberPointLoad {self.id} on Member {self.member_id}: "
+                f"Px={self.px:.3g} N, Py={self.py:.3g} N @ {self.position:.3g} m{label_part}")
+
+
+# --- Member Uniformly Distributed Load (UDL) ---
+
+class MemberUDLoad(MemberLoad):
+    """
+    Represents a uniformly distributed load along the entire length of a member.
+    Loads are defined in the member's local coordinate system.
+
+    Attributes:
+        wx (float): Distributed load parallel to the member's local x-axis (N/m).
+        wy (float): Distributed load perpendicular to the member's local x-axis (N/m).
+    """
+    def __init__(self, id: int, member_id: int, wx: float = 0.0, wy: float = 0.0, label: str = ""):
+        """
+        Initializes a MemberUDLoad.
+
+        Args:
+            id: Unique load identifier.
+            member_id: ID of the target member.
+            wx: Local x distributed load component (N/m). Defaults to 0.0.
+            wy: Local y distributed load component (N/m). Defaults to 0.0.
+            label: Optional descriptive label.
+
+         Raises:
+            TypeError: If id/member_id not int; wx/wy not numeric; label not string.
+        """
+        super().__init__(id, member_id, label)
+        if not all(isinstance(val, (int, float)) for val in [wx, wy]):
+             raise TypeError("MemberUDLoad components (wx, wy) must be numeric.")
+
+        self.wx = float(wx)
+        self.wy = float(wy)
+
+    def __repr__(self) -> str:
+        """Unambiguous representation."""
+        label_part = f", label='{self.label}'" if self.label else ""
+        return (f"MemberUDLoad(id={self.id}, member_id={self.member_id}, "
+                f"wx={self.wx}, wy={self.wy}{label_part})")
+
+    def __str__(self) -> str:
+        """User-friendly representation."""
+        label_part = f" ({self.label})" if self.label else ""
+        return (f"MemberUDLoad {self.id} on Member {self.member_id}: "
+                f"wx={self.wx:.3g} N/m, wy={self.wy:.3g} N/m{label_part}")
+
+# --- Future Load Types ---
+# class MemberTrapezoidalLoad(MemberLoad): ...
+# class ThermalLoad(Load): ...
+
+
+
 # --- Example Usage (Optional) ---
 if __name__ == "__main__":
     # Create dummy nodes, material, section for demonstration

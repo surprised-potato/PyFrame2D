@@ -679,6 +679,8 @@ def test_memberpointload_invalid_inputs():
         MemberPointLoad(id=1, member_id=1, px=0, py="b", position=1)
     with pytest.raises(TypeError, match="MemberPointLoad components .* must be numeric"):
         MemberPointLoad(id=1, member_id=1, px=0, py=0, position="c")
+    with pytest.raises(ValueError, match="MemberPointLoad position .* cannot be negative"):
+        MemberPointLoad(id=1, member_id=1, px=0, py=0, position=-1.0)
     # Invalid position value
     with pytest.raises(ValueError, match="MemberPointLoad position .* cannot be negative"):
         MemberPointLoad(id=1, member_id=1, px=0, py=0, position=-1.0)

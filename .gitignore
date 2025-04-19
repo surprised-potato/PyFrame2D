@@ -1,0 +1,56 @@
+# Python Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / Editor specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Distribution / packaging
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+develop-eggs/
+eggs/
+sdist/
+var/
+*.spec
+
+# Installer logs
+pip-log.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+*.log
+.pytest_cache/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Type checker cache
+.mypy_cache/
+.dmypy.json
+dmypy.json

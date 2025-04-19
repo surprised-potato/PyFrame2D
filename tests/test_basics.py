@@ -1,5 +1,5 @@
 # tests/test_basics.py
-import pytest # We'll install pytest later, but good to import
+import pytest # type: ignore # We'll install pytest later, but good to import
 
 def test_trivial_assertion():
     """

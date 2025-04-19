@@ -1,10 +1,10 @@
 # tests/test_units.py
 import re
-import pytest
+import pytest # type: ignore
 from units.units import parse_value_unit, format_value_unit
 
 # Using pytest.approx for floating point comparisons
-from pytest import approx
+from pytest import approx # type: ignore
 
 # --- Tests for parse_value_unit ---
 

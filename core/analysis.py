@@ -11,7 +11,9 @@ if TYPE_CHECKING:
     from .model import StructuralModel, NodalLoad, MemberLoad, MemberPointLoad, MemberUDLoad
 
 # Import necessary functions from model and elements
-from .model import Load, NodalLoad, MemberLoad # Need these at runtime for isinstance
+from .model import (StructuralModel, Load, NodalLoad, MemberLoad,
+                    MemberPointLoad, MemberUDLoad)
+
 from .elements import local_stiffness_matrix, transformation_matrix, fixed_end_forces
 from numpy.linalg import LinAlgError
 

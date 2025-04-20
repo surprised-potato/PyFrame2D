@@ -1,0 +1,55 @@
+{
+    "file_format_version": "1.0",
+    "model_name": "Untitled Model",
+    "nodes": [
+        {
+            "id": 1,
+            "x": 0.0,
+            "y": 0.0
+        },
+        {
+            "id": 2,
+            "x": 10.0,
+            "y": 0.0
+        },
+        {
+            "id": 3,
+            "x": 10.0,
+            "y": 2.0
+        }
+    ],
+    "materials": [
+        {
+            "id": 1,
+            "name": "steel",
+            "E": 100.0
+        }
+    ],
+    "sections": [
+        {
+            "id": 1,
+            "name": "b1",
+            "__type__": "RectangularProfile",
+            "width": 2.0,
+            "height": 1.0
+        }
+    ],
+    "members": [
+        {
+            "id": 1,
+            "start_node_id": 1,
+            "end_node_id": 2,
+            "material_id": 1,
+            "section_id": 1
+        }
+    ],
+    "supports": [
+        {
+            "node_id": 1,
+            "dx": true,
+            "dy": true,
+            "rz": true
+        }
+    ],
+    "loads": []
+}

@@ -11,43 +11,31 @@
             "id": 2,
             "x": 10.0,
             "y": 0.0
-        },
-        {
-            "id": 3,
-            "x": 10.0,
-            "y": 2.0
         }
     ],
     "materials": [
         {
             "id": 1,
-            "name": "steel",
-            "E": 100.0
+            "name": "1",
+            "E": 1.0
         }
     ],
     "sections": [
         {
-            "id": 1,
-            "name": "b1",
+            "id": 101,
+            "name": "1",
             "__type__": "RectangularProfile",
-            "width": 2.0,
+            "width": 1.0,
             "height": 1.0
         }
     ],
     "members": [
         {
-            "id": 1,
+            "id": 201,
             "start_node_id": 1,
             "end_node_id": 2,
             "material_id": 1,
-            "section_id": 1
-        },
-        {
-            "id": 201,
-            "start_node_id": 2,
-            "end_node_id": 3,
-            "material_id": 1,
-            "section_id": 1
+            "section_id": 101
         }
     ],
     "supports": [
@@ -58,5 +46,14 @@
             "rz": true
         }
     ],
-    "loads": []
+    "loads": [
+        {
+            "id": 301,
+            "label": "",
+            "__type__": "MemberUDLoad",
+            "member_id": 201,
+            "wx": 0.0,
+            "wy": -500.0
+        }
+    ]
 }

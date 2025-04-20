@@ -82,41 +82,59 @@ class MainApplicationWindow(tk.Tk):
     Main application window class using Tkinter.
     Sets up the basic menu, status bar, input forms, and main frame.
     """
+class MainApplicationWindow(tk.Tk):
     def __init__(self):
         super().__init__()
 
+        # --- Core check ---
         if not CORE_AVAILABLE:
-            self.withdraw() # Hide the main window
-            messagebox.showerror("Startup Error", "Core model components failed to load. Application cannot start.")
-            self.destroy()
+            # ... (handle error) ...
             return
 
         self.title("PyFrame2D - Untitled")
-        self.geometry("1000x750") # Increased size slightly more
+        self.geometry("1000x750")
 
+        # --- Define Attributes FIRST ---
         self.model = StructuralModel()
-        self.analysis_results: Optional[AnalysisResults] = None # <<< ADD THIS
-        self.current_file_path: Optional[str] = None # <<< ADD THIS to track file path
-        self.editing_node_id: Optional[int] = None # Track if editing a node
-        self.editing_material_id: Optional[int] = None # Add for others later
-        self.editing_section_id: Optional[int] = None # <<< ADD THIS
+        self.analysis_results: Optional[AnalysisResults] = None
+        self.current_file_path: Optional[str] = None
+
+        # Editing State Flags
+        self.editing_node_id: Optional[int] = None
+        self.editing_material_id: Optional[int] = None
+        self.editing_section_id: Optional[int] = None
         self.editing_member_id: Optional[int] = None
-        self.editing_support_node_id: Optional[int] = None # <<< ADD THIS FLAG
+        self.editing_support_node_id: Optional[int] = None
         self.editing_load_id: Optional[int] = None
 
+        # ID Counters
         self.next_node_id = 1
-        self.next_material_id = 1 # Or 10 etc.
+        self.next_material_id = 1
         self.next_section_id = 1
         self.next_member_id = 1
         self.next_load_id = 1
 
+        # --- View Options (Define BEFORE _create_menu) ---
+        self.show_node_ids = tk.BooleanVar(value=True)
+        self.show_member_ids = tk.BooleanVar(value=True)
+        self.show_supports = tk.BooleanVar(value=True)
+        self.show_loads = tk.BooleanVar(value=True)
+        self.show_deflected_shape = tk.BooleanVar(value=False)
+        # --- End View Options ---
 
-        self._create_menu()
-        self._create_main_layout()
+        # --- Call creation methods AFTER attributes are defined ---
+        self._create_menu()             # Uses show_... variables
+        self._create_main_layout()      # Uses show_... variables indirectly via redraw
         self._create_status_bar()
-        self.protocol("WM_DELETE_WINDOW", self._on_exit)
-        if hasattr(self, 'input_notebook'): # Check if notebook exists
+
+        self.protocol("WM_DELETE_WINDOW", self._on_exit) # Uses _on_exit method
+
+        # Bind tab change event AFTER input_notebook is created in _create_main_layout
+        if hasattr(self, 'input_notebook'):
             self.input_notebook.bind("<<NotebookTabChanged>>", self._on_tab_change)
+        else:
+             print("Warning: input_notebook not found during __init__ binding.")
+
 
 
 
@@ -157,6 +175,9 @@ class MainApplicationWindow(tk.Tk):
 
     def _draw_deflected_shape(self, transform):
         """Draws the deflected shape of the members."""
+        if not self.show_deflected_shape.get():
+            return # Skip drawing if toggled off
+
         if not self.analysis_results or not self.analysis_results.nodal_displacements:
             return
 
@@ -255,15 +276,19 @@ class MainApplicationWindow(tk.Tk):
         return canvas_x, canvas_y
 
     def _draw_nodes(self, transform):
-        """Draws nodes on the canvas."""
+        """Draws nodes and optionally their IDs on the canvas."""
         for node in self.model.nodes.values():
             cx, cy = self._map_coords(node.x, node.y, transform)
             r = NODE_RADIUS
             self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
                                     fill=NODE_COLOR, outline=NODE_COLOR, tags=("node", f"node_{node.id}"))
-            # Optional: Add node ID text
-            # self.canvas.create_text(cx + r + 2, cy - r - 2, text=f"{node.id}", anchor=tk.NW, fill="grey", font=("Segoe UI", 8), tags=("node_label", f"node_label_{node.id}"))
-
+            # --- Add check for showing Node ID ---
+            if self.show_node_ids.get():
+                 self.canvas.create_text(cx + r + 3, cy, # Adjust positioning slightly
+                                         text=f"{node.id}", anchor=tk.W, # Anchor West (left)
+                                         fill="purple", font=("Segoe UI", 8),
+                                         tags=("node_label", f"node_label_{node.id}"))
+            # --- End check ---
 
     def _draw_members(self, transform):
         """Draws members (lines) on the canvas."""
@@ -276,12 +301,17 @@ class MainApplicationWindow(tk.Tk):
 
     def _draw_supports(self, transform):
         """Draws support symbols on the canvas."""
-        s = SUPPORT_SIZE / 2.0 # Half-size for drawing relative to node center
+        if not self.show_supports.get():
+            return # Skip drawing if toggled off
+
+        s = SUPPORT_SIZE / 2.0
         for node_id, support in self.model.supports.items():
-             if node_id not in self.model.nodes: continue # Skip if node doesn't exist
+             # ... (existing code to get node, cx, cy) ...
+             if node_id not in self.model.nodes: continue
              node = self.model.nodes[node_id]
              cx, cy = self._map_coords(node.x, node.y, transform)
              tag = ("support", f"support_{node_id}")
+
 
              # Draw based on type (simplified symbols)
              if support.dx and support.dy and support.rz: # Fixed
@@ -302,6 +332,9 @@ class MainApplicationWindow(tk.Tk):
 
     def _draw_loads(self, transform):
         """Draws load symbols on the canvas."""
+        if not self.show_loads.get():
+            return # Skip drawing if toggled off
+
         # --- Draw Nodal Loads ---
         for load in self.model.loads.values():
             if isinstance(load, NodalLoad):
@@ -731,10 +764,12 @@ class MainApplicationWindow(tk.Tk):
     def _add_load(self):
         """Reads load data, validates, creates Load object, adds to model."""
         load_id = -1 # Default for error message
+        load_type = self.load_type_var.get() # Get type early for focus logic
+
         try:
-            load_id = self.next_load_id # <<< Use counter
+            load_id = self.next_load_id # Use counter
             label = self.load_label_entry.get()
-            load_type = self.load_type_var.get()
+            # load_type already fetched above
 
             load = None
             # --- Validate target existence BEFORE creating load ---
@@ -773,39 +808,58 @@ class MainApplicationWindow(tk.Tk):
                 wy = float(self.load_udl_wy_entry.get())
                 load = MemberUDLoad(load_id, mem_id, wx, wy, label)
             else:
+                 # This case should ideally not be reachable if dropdown is correct
                  raise ValueError(f"Selected load type '{load_type}' not handled.")
 
+            # If load object creation succeeded:
             if load:
                  self.model.add_load(load)
-                 self.next_load_id += 1 # <<< Increment counter
+                 self.next_load_id += 1 # Increment counter
 
                  self.set_status(f"Load {load_id} added successfully.")
                  # Clear label field
                  self.load_label_entry.delete(0, tk.END)
-                 # Clear specific fields
-                 self._update_load_fields() # Clears specific fields
-                 self._update_next_id_display() # <<< Update ID field display
-                 # Set focus back to relevant field (e.g., target ID)
-                 if load_type == "Nodal": self.load_nodal_node_entry.focus()
-                 else: self.load_pt_mem_entry.focus() # or load_udl_mem_entry
+                 # Clear specific fields by calling update
+                 self._update_load_fields()
+                 # Update the displayed next ID
+                 self._update_next_id_display()
+                 print(f"Model Loads: {self.model.loads}") # Debug print
 
-                 print(f"Model Loads: {self.model.loads}")
+                 # Repopulate listbox
                  self._populate_loads_listbox()
+                 # Redraw canvas
                  self._redraw_canvas()
+                 # Force GUI update before setting focus
                  self.update_idletasks()
 
+                 # --- Set Focus Correctly ---
+                 print(f"DEBUG [AddLoad]: Setting focus. load_type = '{load_type}'") # Debug
+                 if load_type == "Nodal":
+                     if hasattr(self, 'load_nodal_node_entry'): self.load_nodal_node_entry.focus()
+                 elif load_type == "Member Point":
+                     if hasattr(self, 'load_pt_mem_entry'): self.load_pt_mem_entry.focus()
+                 elif load_type == "Member UDL":
+                     if hasattr(self, 'load_udl_mem_entry'): self.load_udl_mem_entry.focus() # Focus on UDL member entry
+                 else: # Fallback
+                     self.load_label_entry.focus()
+                 print(f"DEBUG [AddLoad]: Focus set attempt finished.") # Debug
+                 # --- End Focus ---
+
+        # --- Exception Handling ---
         except (ValueError, TypeError) as e:
             error_msg = f"Invalid input for Load {load_id if load_id != -1 else '(?)'}: {e}"
             messagebox.showerror("Input Error", error_msg)
             self.set_status(f"Error adding load: {e}")
         except AttributeError as e:
-             error_msg = f"Missing input field for Load {load_id if load_id != -1 else '(?)'}: {e}"
-             messagebox.showerror("Input Error", error_msg)
-             self.set_status(f"Error adding load: Incomplete fields.")
+            # This catches if specific entry fields don't exist when .get() is called
+            error_msg = f"Missing input field for Load {load_id if load_id != -1 else '(?)'}: {e}"
+            messagebox.showerror("Input Error", error_msg)
+            self.set_status(f"Error adding load: Incomplete fields.")
         except Exception as e:
              error_msg = f"Could not add Load {load_id if load_id != -1 else '(?)'}: {e}"
              messagebox.showerror("Error", error_msg)
              self.set_status(f"Error adding load: {e}")
+
 
     def _update_load(self):
         """Handles updating an existing load after editing."""
@@ -937,6 +991,22 @@ class MainApplicationWindow(tk.Tk):
         edit_menu.add_command(label="Undo (Placeholder)", command=self._placeholder_command)
         edit_menu.add_command(label="Redo (Placeholder)", command=self._placeholder_command)
 
+        view_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="View", menu=view_menu)
+        # Add checkbuttons linked to BooleanVars
+        view_menu.add_checkbutton(label="Show Node IDs", variable=self.show_node_ids, command=self._redraw_canvas)
+        view_menu.add_checkbutton(label="Show Member IDs", variable=self.show_member_ids, command=self._redraw_canvas)
+        view_menu.add_checkbutton(label="Show Supports", variable=self.show_supports, command=self._redraw_canvas)
+        view_menu.add_checkbutton(label="Show Loads", variable=self.show_loads, command=self._redraw_canvas)
+        view_menu.add_checkbutton(label="Show Deflected Shape", variable=self.show_deflected_shape, command=self._redraw_canvas)
+        view_menu.add_separator()
+        view_menu.add_command(label="Zoom In (Placeholder)", command=self._placeholder_command)
+        view_menu.add_command(label="Zoom Out (Placeholder)", command=self._placeholder_command)
+        view_menu.add_command(label="Pan (Placeholder)", command=self._placeholder_command)
+        view_menu.add_command(label="Fit to View (Placeholder)", command=self._placeholder_command)
+        # --- End View Menu ---
+
+
         # --- Analyze Menu ---
         analyze_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="Analyze", menu=analyze_menu)
@@ -1041,17 +1111,37 @@ class MainApplicationWindow(tk.Tk):
         # TODO: Add '*' indicator for unsaved changes later
 
     def _file_new(self):
-        """Handles the File -> New Project action."""
-        # TODO: Add check for unsaved changes before clearing
-        if messagebox.askokcancel("New Project", "Clear current model and start new project?\nAny unsaved changes will be lost."):
-            self.model = StructuralModel() # Create new empty model
-            self.analysis_results = None
-            self._clear_results_display()
-            self.current_file_path = None # Reset file path
-            self._update_window_title()
-            self.set_status("New project started.")
-            print("Model Cleared.")
-            self._redraw_canvas() # Redraw to clear canvas
+        """Clears the current model and results, resets GUI state."""
+        try:
+            # TODO: Add check for unsaved changes
+            if messagebox.askokcancel("New Project", "Clear current model and start new project?\nAny unsaved changes will be lost."):
+                 self.model = StructuralModel() # Create new empty model
+                 self.analysis_results = None
+
+                 # --- Reset ID Counters ---
+                 self.next_node_id = 1
+                 self.next_material_id = 1
+                 self.next_section_id = 101
+                 self.next_member_id = 201
+                 self.next_load_id = 301
+                 # --- End Reset ---
+
+                 self._clear_results_display() # Clear results tabs
+                 self.current_file_path = None
+                 self._update_window_title()
+
+                 # --- ADD GUI UPDATES ---
+                 self._update_all_listboxes() # Clears listboxes based on empty model
+                 self._reset_all_buttons_and_ids() # Resets buttons and updates ID displays
+                 # --- END ADD ---
+
+                 self.set_status("New project started.")
+                 print("Model Cleared.")
+                 self._redraw_canvas() # Redraw to clear canvas
+                 self.update_idletasks()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not create new project: {e}")
+            self.set_status(f"Error creating new project: {e}")
 
     def _file_open(self):
         """Handles the File -> Open Project action."""
@@ -2586,46 +2676,52 @@ class MainApplicationWindow(tk.Tk):
             elif load_type_name == "MemberUDLoad": load_type_display = "Member UDL"
 
             # Set common fields
-            self.load_id_entry.config(state=tk.NORMAL) # Enable temporarily
+            self.load_id_entry.config(state=tk.NORMAL)
             self.load_id_entry.delete(0, tk.END); self.load_label_entry.delete(0, tk.END)
             self.load_id_entry.insert(0, str(load.id))
-            self.load_id_entry.config(state=tk.DISABLED) # Disable again
+            self.load_id_entry.config(state=tk.DISABLED)
             self.load_label_entry.insert(0, str(load.label))
 
-            # Update type dropdown and specific fields
-            self.load_type_var.set(load_type_display) # Triggers _update_load_fields
-            self.update_idletasks() # Force field recreation
+            # --- Update type dropdown FIRST to recreate fields ---
+            self.load_type_var.set(load_type_display)
+            # --- Force Tkinter to process the update NOW ---
+            self.update_idletasks()
+            # --- END UPDATE ---
 
-            # Populate the newly created fields
+            # --- Now populate the NEWLY CREATED specific fields ---
             if isinstance(load, NodalLoad):
-                self.load_nodal_node_entry.insert(0, str(load.node_id))
-                self.load_nodal_fx_entry.delete(0,tk.END); self.load_nodal_fx_entry.insert(0, str(load.fx))
-                self.load_nodal_fy_entry.delete(0,tk.END); self.load_nodal_fy_entry.insert(0, str(load.fy))
-                self.load_nodal_mz_entry.delete(0,tk.END); self.load_nodal_mz_entry.insert(0, str(load.mz))
+                # Check attributes exist before using
+                if hasattr(self, 'load_nodal_node_entry'): self.load_nodal_node_entry.insert(0, str(load.node_id))
+                if hasattr(self, 'load_nodal_fx_entry'): self.load_nodal_fx_entry.delete(0,tk.END); self.load_nodal_fx_entry.insert(0, str(load.fx))
+                if hasattr(self, 'load_nodal_fy_entry'): self.load_nodal_fy_entry.delete(0,tk.END); self.load_nodal_fy_entry.insert(0, str(load.fy))
+                if hasattr(self, 'load_nodal_mz_entry'): self.load_nodal_mz_entry.delete(0,tk.END); self.load_nodal_mz_entry.insert(0, str(load.mz))
             elif isinstance(load, MemberPointLoad):
-                self.load_pt_mem_entry.insert(0, str(load.member_id))
-                self.load_pt_px_entry.delete(0,tk.END); self.load_pt_px_entry.insert(0, str(load.px))
-                self.load_pt_py_entry.delete(0,tk.END); self.load_pt_py_entry.insert(0, str(load.py))
-                self.load_pt_pos_entry.insert(0, str(load.position))
+                if hasattr(self, 'load_pt_mem_entry'): self.load_pt_mem_entry.insert(0, str(load.member_id))
+                if hasattr(self, 'load_pt_px_entry'): self.load_pt_px_entry.delete(0,tk.END); self.load_pt_px_entry.insert(0, str(load.px))
+                if hasattr(self, 'load_pt_py_entry'): self.load_pt_py_entry.delete(0,tk.END); self.load_pt_py_entry.insert(0, str(load.py))
+                if hasattr(self, 'load_pt_pos_entry'): self.load_pt_pos_entry.insert(0, str(load.position))
             elif isinstance(load, MemberUDLoad):
-                self.load_udl_mem_entry.insert(0, str(load.member_id))
-                self.load_udl_wx_entry.delete(0,tk.END); self.load_udl_wx_entry.insert(0, str(load.wx))
-                self.load_udl_wy_entry.delete(0,tk.END); self.load_udl_wy_entry.insert(0, str(load.wy))
+                if hasattr(self, 'load_udl_mem_entry'): self.load_udl_mem_entry.insert(0, str(load.member_id)) # <<< Should work now
+                if hasattr(self, 'load_udl_wx_entry'): self.load_udl_wx_entry.delete(0,tk.END); self.load_udl_wx_entry.insert(0, str(load.wx))
+                if hasattr(self, 'load_udl_wy_entry'): self.load_udl_wy_entry.delete(0,tk.END); self.load_udl_wy_entry.insert(0, str(load.wy))
+            # Add elif for other types if needed
+            # --- End Populate ---
 
-            # --- Set editing state and change button ---
+            # Set editing state and change button
             self.editing_load_id = load_id
             self.load_add_update_button.config(text="Update Load", command=self._update_load)
-            # --- End Change ---
 
             self.set_status(f"Editing Load {load_id}. Modify fields and click 'Update Load'.")
 
         except KeyError:
              messagebox.showerror("Error", f"Load {load_id} not found for editing.")
              self._reset_load_button()
+        except AttributeError as e: # Catch errors if expected entry attribute is missing
+             messagebox.showerror("Error", f"GUI Error preparing load fields for edit: {e}")
+             self._reset_load_button()
         except Exception as e:
              messagebox.showerror("Error", f"Could not prepare load for editing: {e}")
              self._reset_load_button()
-
 
     def _update_load_fields(self, *args):
         """Updates load input fields based on selected type."""
